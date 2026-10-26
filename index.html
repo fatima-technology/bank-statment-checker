@@ -695,7 +695,7 @@ const state={
   entries:[],      // {id,created,date,amount,dir,sender,bank,ref,note,img,ocrText,match,lock,status}
   ui:{from:'',to:'',tab:'dash',stmtSel:'',zoom:100,focusRow:null,searchHits:new Set(),showAll:false}
 };
-const RT={hl:new Map(),hByRow:new Map(),hByEntry:new Map(),rows:new Map(),pages:{},used:new Set(),transfers:[],xfer:new Map(),pdf:{},crops:new Map()}; // runtime
+const RT={dupE:new Map(),dupH:new Map(),hl:new Map(),hByRow:new Map(),hByEntry:new Map(),rows:new Map(),pages:{},used:new Set(),transfers:[],xfer:new Map(),pdf:{},crops:new Map()}; // runtime
 const DB={db:null,
   open(){return new Promise(res=>{try{const r=indexedDB.open('bankMatchAgent',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>{this.db=r.result;res(true)};r.onerror=()=>res(false)}catch(e){res(false)}})},
   tx(mode,fn){return new Promise((res,rej)=>{if(!this.db)return res(null);const t=this.db.transaction('kv',mode);const st=t.objectStore('kv');const r=fn(st);t.oncomplete=()=>res(r&&r.result);t.onerror=()=>rej(t.error)})},
@@ -1900,6 +1900,7 @@ const LR=[
 [/^Double: #(\d+) jaisa$/,'Double: same as #$1'],[/^Double likha: #(\d+) jaisa$/,'Written twice: same as #$1'],[/^Double likha$/,'Written twice'],
 [/^(\d+) double screenshot \(ek hi payment do dafa\):$/,'$1 duplicate screenshots (same payment twice):'],
 [/(\d+) raqam hisaab mein double likhi hai/g,'$1 amounts written twice in ledger'],
+[/^(.+?) ki koi line(.*?)\s*statement mein nahi hai\.$/,(m,a,b)=>`No statement line for ${a}${b.trim()?' '+b.trim():''}.`],
 [/^Sirf (.+)$/,'Only $1']
 ];
 function trText(s){
