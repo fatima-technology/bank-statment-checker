@@ -424,7 +424,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);margin-top:8px}
   <div class="wrap">
     <div class="bar">
       <div class="brand"><span><span class="mark">Bank</span> Match</span><small>Screenshot aur statement ki tasdeeq</small></div>
-      <button class="iconbtn" id="installBtn" hidden title="App install karein" aria-label="App install karein"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg></button>
+      <button class="iconbtn" id="installBtn" title="App install karein" aria-label="App install karein"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg></button>
       <button class="langbtn notr" id="langBtn" title="Zubaan / Language" aria-label="Roman Urdu ya English"><span data-l="ur" class="on">UR</span><span data-l="en">EN</span></button>
       <div class="dayfilter">
         <label class="rng"><span>Se</span><input type="date" id="fromInput" aria-label="Kis tareekh se"></label>
@@ -1745,7 +1745,7 @@ const LX=new Map([
 ['Kisi line par tap karein to statement mein wahi line khul jayegi. Talash ki sab lines statement par neeli ho jati hain.','Tap a line to open it on the statement. All search hits turn blue on the statement.'],
 ['Statement mein','In statement'],['Screenshots mein','In screenshots'],
 ['Screenshot tasdeeq','Screenshot verification'],['Banks ke darmiyan transfer','Transfers between banks'],['Sirf bina screenshot credits','Only credits without screenshot'],
-['App install karein','Install app'],['Double likhi','Written twice'],
+['App install karein','Install app'],['Bank Checker install karein','Install Bank Checker'],['Chrome ne abhi khud install ka button nahi diya. Ye is tarah ho jayega:','Chrome has not offered its own install button yet. Do it like this:'],['Band karo','Close'],['Double likhi','Written twice'],
 ['Hisaab ki tareekh ki gunjaish (din)','Ledger date tolerance (days)'],
 ['Hisaab mein likhi tareekh aksar payment wale din ki nahi hoti. 7 (default) = hisaab ki raqam 7 din aage/peechhe tak ke screenshot ya bank line se mil jayegi; sab se qareeb wali tareekh pehle chuni jaati hai. Agar naam bhi milta ho to 35 din tak ka farq chal jata hai.','The date written in the ledger is often not the payment day. 7 (default) = a ledger amount matches a screenshot or bank line up to 7 days before/after; the closest date is picked first. If the name matches too, up to 35 days apart is allowed.'],
 ['Purani bina-screenshot entries Hisaab mein muntaqil kar di gayin','Old no-screenshot entries moved to the Ledger'],['Bank Checker install ho gaya','Bank Checker installed'],
@@ -1941,13 +1941,26 @@ function setLang(l,quiet){
   if(!quiet)save();
 }
 const _confirm=window.confirm.bind(window);window.confirm=m=>_confirm(L(m));
-$('#installBtn').onclick=async()=>{if(!installEvt)return;installEvt.prompt();try{await installEvt.userChoice}catch(_){}installEvt=null;$('#installBtn').hidden=true};
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+if(isStandalone()||!/^https?:$/.test(location.protocol))$('#installBtn').hidden=true;
+$('#installBtn').onclick=async()=>{
+  if(installEvt){installEvt.prompt();try{await installEvt.userChoice}catch(_){}installEvt=null;return}
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent),mob=/android|mobile/i.test(navigator.userAgent);
+  openModal(`<h2>Bank Checker install karein</h2>
+   <p class="sm muted" style="margin:0 0 10px">Chrome ne abhi khud install ka button nahi diya. Ye is tarah ho jayega:</p>
+   <ol style="margin:0;padding-left:20px;line-height:1.7">${ios?
+    '<li>Safari mein neeche <b>Share</b> (☐↑) dabayein.</li><li><b>Add to Home Screen</b> chunein.</li><li><b>Add</b> dabayein.</li>':mob?
+    '<li>Chrome mein upar daayein <b>⋮</b> (teen nuqtay) dabayein.</li><li><b>Add to Home screen</b> ya <b>Install app</b> chunein.</li><li><b>Install</b> dabayein.</li>':
+    '<li>Chrome mein upar daayein <b>⋮</b> (teen nuqtay) dabayein.</li><li><b>Cast, save and share</b> → <b>Install page as app…</b> chunein (purane Chrome mein seedha <b>Install Bank Checker</b>).</li><li><b>Install</b> dabayein.</li>'}</ol>
+   <p class="sm muted" style="margin:12px 0 0">Option na dikhe to: <b>chrome://apps</b> khol kar dekhein ke purani Bank Checker wahan to nahi; ho to us par right-click → <b>Remove from Chrome</b>. Phir Chrome poora band kar ke dobara kholein aur ye page <b>Ctrl+Shift+R</b> se reload karein.</p>
+   <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Band karo</button></div>`);
+};
 $('#langBtn').onclick=()=>setLang(LANG==='en'?'ur':'en');
 
 /* ============ install app (Bank Checker) ============ */
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol))addEventListener('load',()=>navigator.serviceWorker.register('bank-checker-sw.js').catch(()=>{}));
 let installEvt=null;
-addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const b=$('#installBtn');if(b)b.hidden=false});
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const b=$('#installBtn');if(b&&!isStandalone())b.hidden=false});
 addEventListener('appinstalled',()=>{installEvt=null;const b=$('#installBtn');if(b)b.hidden=true;toast('Bank Checker install ho gaya')});
 /* ============ boot ============ */
 (async function boot(){
