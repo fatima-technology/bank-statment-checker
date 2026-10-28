@@ -296,7 +296,9 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);margin-top:8px}
 .rp tbody.pair tr:first-child td{border-bottom:0}
 .rp tbody.pair{break-inside:avoid;page-break-inside:avoid}
 .pagebreak{break-before:page;page-break-before:always;height:0;border-top:3px double #9EA394;margin:28px 0}
-@media print{.pagebreak{border:0;margin:0}}
+@media print{.pagebreak{border:0;margin:0}.rp .sec{break-before:page;page-break-before:always}}
+.rp .sec{margin-top:26px;padding-top:6px;border-top:3px double #9EA394}
+.rp h3{font:600 15px/1.3 "Mukta",system-ui,sans-serif;margin:14px 0 2px;color:#16213A}
 .rp th.ref,.rp td.ref{width:62px;max-width:62px;font-size:10px;line-height:1.25;word-break:break-all;overflow-wrap:anywhere;color:#4A5266}
 .rp td.ref{font-family:"IBM Plex Sans Arabic","Mukta",sans-serif}
 @media print{.rp th,.rp td{padding:5px 4px}.rp{font-size:12px}.toast,.modal{display:none!important}}
@@ -581,6 +583,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);margin-top:8px}
       <div class="row" style="margin-bottom:10px">
         <label class="f" for="rType" style="margin:0">Report</label>
         <select id="rType" style="width:auto">
+          <option value="full" selected>Mukammal report (sab kuch, alag alag hisse)</option>
           <option value="tasdeeq">Screenshot tasdeeq</option>
           <option value="xfer">Banks ke darmiyan transfer</option>
           <option value="orph">Sirf bina screenshot credits</option>
@@ -1305,12 +1308,13 @@ function buildReport(opts){
 function reportOpts(){return {crops:$('#rCrops').checked,shots:$('#rShots').checked,orph:$('#rOrph').checked}}
 let repSeq=0;
 async function renderReport(){const t=$('#rType').value;const o=reportOpts();const my=++repSeq;fillBankSel();
-  $('#rShots').closest('label').style.display=t==='tasdeeq'||t==='hisaab'?'':'none';$('#rOrph').closest('label').style.display=t==='tasdeeq'?'':'none';
-  const sel=$('#rBank').value;const sids=sel==='__each'?state.statements.map(x=>x.id):[sel];
-  const build=()=>t==='hisaab'?buildHisaabReport(o):t==='xfer'?buildXferReport(o):t==='cash'?buildCashReport(o):t==='orph'?buildOrphReport(o):buildReport(o);
+  $('#rShots').closest('label').style.display=t==='tasdeeq'||t==='hisaab'||t==='full'?'':'none';$('#rBank').style.display=$('label[for=rBank]').style.display=t==='full'?'none':'';$('#rOrph').closest('label').style.display=t==='tasdeeq'?'':'none';
+  const sel=t==='full'?'':$('#rBank').value;const sids=sel==='__each'?state.statements.map(x=>x.id):[sel];
+  const build=()=>t==='full'?buildFullReport(o):t==='hisaab'?buildHisaabReport(o):t==='xfer'?buildXferReport(o):t==='cash'?buildCashReport(o):t==='orph'?buildOrphReport(o):buildReport(o);
   if(o.crops){let rows=[];
     for(const sid of sids){RB=sid;
-      if(t==='tasdeeq')reportData().es.forEach(e=>{const r=e.match&&RT.rows.get(e.match.rowId);if(r)rows.push(r)});
+      if(t==='full'){const d=fullData();d.secs.forEach(s=>s.its.forEach(i=>{if(i.r)rows.push(i.r)}));rows.push(...d.cash)}
+      else if(t==='tasdeeq')reportData().es.forEach(e=>{const r=e.match&&RT.rows.get(e.match.rowId);if(r)rows.push(r)});
       else if(t==='xfer')rXfers().forEach(x=>rows.push(x.out,x.in));
       else if(t==='orph')rows.push(...rOrphans());
       else if(t==='hisaab')rHisaab().forEach(h=>{const x=hInfo(h);const r=x.rowId&&RT.rows.get(x.rowId);if(r)rows.push(r)});
@@ -1355,10 +1359,11 @@ function buildCashReport(o){
   }
   return `<div class="rp">${h}<div class="sign"><span>Tayyar karne wala</span><span>Tasdeeq karne wala</span></div></div>`;
 }
-function waText(){const sel=$('#rBank').value;if(sel==='__each'){const out=state.statements.map(st=>{$('#rBank').value=st.id;return waText1()});$('#rBank').value='__each';return out.join('\n\n')}return waText1()}
+function waText(){if($('#rType').value==='full')return waFull();const sel=$('#rBank').value;if(sel==='__each'){const out=state.statements.map(st=>{$('#rBank').value=st.id;return waText1()});$('#rBank').value='__each';return out.join('\n\n')}return waText1()}
 function waText1(){RB=$('#rBank').value;try{return (RB?`*${rbName()}*\n`:'')+waTextCore()}finally{RB=''}}
 function waTextCore(){
   const t0=$('#rType').value,day=rangeLabel();
+  if(t0==='full')return waFull();
   if(t0==='hisaab')return waHisaab();
   if(t0==='xfer'){const xs=rXfers();let t=`*Banks ke darmiyan transfer* — ${day}\nKul: ${xs.length}, ${fmtAmt(xs.reduce((a,x)=>a+x.amount,0))}\n\n`;xs.forEach(x=>{t+=`${x.n}. ${fmtAmt(x.amount)} — ${bankName(x.out)} se nikal kar ${bankName(x.in)} mein — ${fmtDate(x.out.date)}\n`});return t}
   if(t0==='orph'){const or=rOrphans().slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')||bankName(a).localeCompare(bankName(b))||a.page-b.page);let t=`*Bina screenshot credits* — ${day}\nKul: ${or.length}, ${fmtAmt(or.reduce((a,r)=>a+(rowCredit(r)||0),0))}\n\n`;or.forEach((r,i)=>{const p=party(r);t+=`${i+1}. ${fmtDate(r.date)} — ${fmtAmt(rowCredit(r))} — ${p.name||'?'}${p.bank?' ('+p.bank+')':''} — ${bankName(r)} mein\n`});return t}
@@ -1457,7 +1462,7 @@ $('#rWa').onclick=async()=>{const t=L(waText());try{await navigator.clipboard.wr
 $('#rHtml').onclick=async()=>{
   await renderReport();const own=[...document.styleSheets].find(x=>!x.href);const css=[...own.cssRules].map(r=>r.cssText).filter(t=>t.startsWith('.rp')).join('\n');
   const html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${L('Bank Tasdeeq Report')}</title><style>body{font:14px system-ui,Arial,sans-serif;margin:20px;color:#111}${css}</style></head><body>${$('#reportPreview').innerHTML}</body></html>`;
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download=`${({tasdeeq:'Bank-Tasdeeq',orph:'Bina-Screenshot-Credits',xfer:'Bank-Transfers',cash:'Cash-Out'})[$('#rType').value]}${(()=>{const v=$('#rBank').value;if(!v)return '';if(v==='__each')return '-har-bank';const st=state.statements.find(x=>x.id===v);return '-'+String(st?(st.bank||st.name):'').replace(/[^A-Za-z0-9]+/g,'-')})()}-${rangeSlug()}.html`;a.click();
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download=`${({full:'Mukammal-Report',hisaab:'Hisaab-Tasdeeq',tasdeeq:'Bank-Tasdeeq',orph:'Bina-Screenshot-Credits',xfer:'Bank-Transfers',cash:'Cash-Out'})[$('#rType').value]}${(()=>{const v=$('#rBank').value;if(!v)return '';if(v==='__each')return '-har-bank';const st=state.statements.find(x=>x.id===v);return '-'+String(st?(st.bank||st.name):'').replace(/[^A-Za-z0-9]+/g,'-')})()}-${rangeSlug()}.html`;a.click();
 };
 
 function loadSettingsUI(){const S=state.settings;$('#sNoSave').checked=!!S.noSave;noSaveHelp();$('#sBiz').value=S.biz;$('#sFmt').value=S.dateFmt;$('#sDay').value=S.dayTol;$('#sAmt').value=S.amtTol;$('#sHTol').value=S.hTol??7}
@@ -1604,7 +1609,7 @@ function hisaabTally(withBtns){
   {const dh=hs.filter(h=>RT.dupH.has(h.id));if(dh.length)extra.push(`${dh.length} raqam hisaab mein double likhi hai (${fmtAmt(sum(dh))})`)}
   if(sn.length)extra.push(`${sn.length} screenshot hisaab mein nahi likhe (${fmtAmt(sn.reduce((a,e)=>a+(+e.amount||0),0))})`);
   if(extra.length)t+=`<p class="sm" style="margin:10px 0 0;color:var(--rubric)">${extra.map(esc).join('<br>')}</p>`;
-  if(withBtns)t+=`<div class="next">${(ss.length+none.length)?'<button class="btn pri" data-go="hisaab" data-hstatus="miss">Na milne wali dekhein</button>':''}<button class="btn" data-go="hisaab">Hisaab kholein</button><button class="btn" data-goreport="hisaab">Hisaab report</button></div>`;
+  if(withBtns)t+=`<div class="next">${(ss.length+none.length)?'<button class="btn pri" data-go="hisaab" data-hstatus="miss">Na milne wali dekhein</button>':''}<button class="btn" data-go="hisaab">Hisaab kholein</button><button class="btn" data-goreport="full">Mukammal report</button></div>`;
   return t;
 }
 function renderHisaab(){
@@ -1717,6 +1722,75 @@ function openSkinPicker(){
     $$('#modalBox [data-skin-pick]').forEach(x=>x.classList.toggle('on',x===b))});
 }
 
+/* ============ mukammal report: chuni hui tareekh ka sara data, har qism alag hisse mein ============ */
+/* Har cheez (hisaab entry, screenshot, bank credit) sirf ek hisse mein aati hai, koi chhootti nahi */
+function fullItems(){
+  const items=[];const usedE=new Set(),usedR=new Set();
+  const rowOf=id=>id?RT.rows.get(id):null;
+  for(const h of visibleHisaab()){const x=hInfo(h);const r=rowOf(x.rowId);const e=hEntry(x.entryId);
+    if(e)usedE.add(e.id);if(r)usedR.add(r.id);
+    const k=r&&e?'LSB':r?'LB':e?'LS':'L';
+    items.push({k,h,e,r,amt:+h.amount||0,date:(r&&r.date)||(e&&edate(e))||h.date||''})}
+  const undated=[];
+  for(const e of state.entries){if(usedE.has(e.id)||e.dir==='out'||e.status==='ocr')continue;
+    const d=edate(e);if(!d){if(hasRange())undated.push(e);else items.push({k:'S',e,amt:+e.amount||0,date:''});continue}
+    if(!inRange(d))continue;const r=e.match&&rowOf(e.match.rowId);if(r)usedR.add(r.id);
+    items.push({k:r?'SB':'S',e,r,amt:+e.amount||0,date:d})}
+  for(const r of RT.rows.values()){if(usedR.has(r.id)||!creditRow(r)||!inRange(r.date))continue;
+    if(state.entries.some(e=>e.match&&e.match.rowId===r.id))continue;
+    items.push({k:'B',r,amt:rowCredit(r)||0,date:r.date})}
+  const outShots=visibleEntries().filter(e=>e.dir==='out');
+  items.sort((a,b)=>(a.date||'9').localeCompare(b.date||'9')||a.amt-b.amt);
+  return {items,undated,outShots,cash:cashOutRows(),xfers:transfersFor()};
+}
+const FULL_SECS=[
+  ['LSB','Mil gayi: ledger, screenshot aur bank teeno mein','ok',['LSB']],
+  ['S','Screenshot hai, magar ledger mein record nahi','bad',['SB','S']],
+  ['LS','Ledger aur screenshot hai, magar bank statement mein nahi','bad',['LS']],
+  ['B','Statement mein hai, magar ledger ya screenshot nahi','warn',['LB','B']],
+  ['L','Ledger mein hai, magar na screenshot na statement','bad',['L']]
+];
+function fullData(){const d=fullItems();const secs=FULL_SECS.map(([id,title,cls,ks])=>{const its=d.items.filter(i=>ks.includes(i.k));return {id,title,cls,its,n:its.length,amt:its.reduce((a,i)=>a+i.amt,0)}});return {...d,secs}}
+function fullRow(it,i,o){
+  const {h,e,r}=it;const yes=t=>`<span class="ok">✓ ${t}</span>`,no=t=>`<span class="bad">✗ ${t}</span>`;
+  const name=(h&&h.name)||(e&&e.sender)||(r&&party(r).name)||'—';
+  const bank=(h&&h.bank)||(e&&e.bank)||(r&&party(r).bank)||'';
+  const L=h?yes('Hisaab')+`<div class="stmtline">${fmtDate(h.date)}${RT.dupH.has(h.id)?' · <b class="bad">Double likha</b>':''}</div>`:no('Hisaab mein nahi');
+  const S=e?(o.shots&&e.img?`<img class="ss" src="${e.img}"><br>`:'')+yes('Screenshot')+`<div class="stmtline">${esc(e.sender||'')}${e.ref?' · '+esc(e.ref):''}${RT.dupE.has(e.id)?' · <b class="bad">Double</b>':''}</div>`:no('Screenshot nahi');
+  const B=r?yes('Statement')+`<div class="stmtline">${esc(bankName(r))}, page ${r.page}<br>Txn ${fmtDate(r.date)}</div>`:state.statements.length?no('Statement mein nahi'):'<span>Statement nahi daali</span>';
+  return `<tbody class="pair"><tr><td>${i+1}</td><td>${it.date?fmtDate(it.date):'—'}</td><td><b>${fmtAmt(it.amt)}</b></td><td>${esc(name)}${bank?`<br><small>${esc(bank)}</small>`:''}</td><td>${L}</td><td>${S}</td><td>${B}</td></tr>${r&&o.crops?`<tr class="croprow"><td></td><td colspan="6"><img class="crop" src="${cropRow(r)}" alt="Statement ki line"></td></tr>`:''}</tbody>`;
+}
+function buildFullReport(o){
+  const d=fullData();const cashTot=d.cash.reduce((a,r)=>a+r.debit,0);
+  const sumRows=d.secs.map((s,i)=>`<tr><td>${i+1}</td><td class="${s.cls==='ok'?'ok':s.cls==='bad'?'bad':''}">${esc(s.title)}</td><td>${s.n}</td><td><b>${fmtAmt(s.amt)}</b></td></tr>`).join('')+
+    `<tr><td>6</td><td>Cash out (bank se nikla)</td><td>${d.cash.length}</td><td><b>${fmtAmt(cashTot)}</b></td></tr>`+
+    (d.xfers.length?`<tr><td>7</td><td>Apne accounts ke darmiyan transfer</td><td>${d.xfers.length}</td><td><b>${fmtAmt(d.xfers.reduce((a,x)=>a+x.amount,0))}</b></td></tr>`:'')+
+    (d.undated.length?`<tr><td>8</td><td class="bad">Screenshot jin ki tareekh nahi parhi gayi</td><td>${d.undated.length}</td><td><b>${fmtAmt(d.undated.reduce((a,e)=>a+(+e.amount||0),0))}</b></td></tr>`:'');
+  let h=rpHead('Mukammal report')+`<p class="say">Is report mein chuni hui tareekh ka sara data hai. Har entry sirf ek hisse mein aati hai, aur har hissa alag page par print hota hai.</p>
+    <table><tr><th>#</th><th>Hissa</th><th>Entries</th><th>Raqam</th></tr>${sumRows}</table>`;
+  if(!(state.hisaab||[]).length)h+=`<p class="say">Hisaab mein abhi koi entry nahi likhi, is liye har screenshot "ledger mein record nahi" mein aayega.</p>`;
+  d.secs.forEach((s,i)=>{if(!s.n)return;
+    h+=`<section class="sec"><h2>${i+1}. ${esc(s.title)} (${s.n}) — ${fmtAmt(s.amt)}</h2><table><tr><th>#</th><th>Tareekh</th><th>Amount</th><th>Naam / Bank</th><th>Ledger</th><th>Screenshot</th><th>Bank statement</th></tr>${s.its.map((it,j)=>fullRow(it,j,o)).join('')}</table></section>`});
+  if(d.cash.length||d.outShots.length){
+    const g={};for(const r of d.cash){const c=cashCat(r);(g[c]=g[c]||{n:0,a:0,rows:[]}).n++;g[c].a+=r.debit;g[c].rows.push(r)}
+    h+=`<section class="sec"><h2>6. Cash out (bank se nikla) (${d.cash.length}) — ${fmtAmt(cashTot)}</h2>`;
+    for(const [cat,v] of Object.entries(g).sort((a,b)=>b[1].a-a[1].a))
+      h+=`<h3>${esc(cat)} — ${fmtAmt(v.a)} (${v.n})</h3><table><tr><th>#</th><th>Transaction Date</th><th>Bank</th><th>Kis ko / kya</th><th>Amount</th></tr>${v.rows.map((r,i)=>`<tbody class="pair"><tr><td>${i+1}</td><td>${fmtDate(r.date)}</td><td>${esc(bankName(r))}<br><small>page ${r.page}</small></td><td>${esc(partyText(r))}</td><td><b>${fmtAmt(r.debit)}</b></td></tr>${o.crops?`<tr class="croprow"><td></td><td colspan="4"><img class="crop" src="${cropRow(r)}" alt=""></td></tr>`:''}</tbody>`).join('')}</table>`;
+    if(d.outShots.length)h+=`<h3>Bheji gayi raqam ke screenshots (${d.outShots.length})</h3><table><tr><th>#</th><th>Tareekh</th><th>Amount</th><th>Kis ko</th><th>Bank statement</th></tr>${d.outShots.map((e,i)=>{const r=e.match&&RT.rows.get(e.match.rowId);return `<tr><td>${i+1}</td><td>${fmtDate(edate(e))}</td><td><b>${fmtAmt(e.amount)}</b></td><td>${esc(e.sender||'—')}</td><td>${r?`<span class="ok">✓</span> ${esc(bankName(r))}, page ${r.page}`:'<span class="bad">✗</span>'}</td></tr>`}).join('')}</table>`;
+    h+='</section>';
+  }
+  if(d.xfers.length)h+=`<section class="sec"><h2>7. Apne accounts ke darmiyan transfer (${d.xfers.length})</h2><table><tr><th>#</th><th>Tareekh</th><th>Amount</th><th>Kahan se</th><th>Kahan</th></tr>${d.xfers.map((t,i)=>`<tr><td>${i+1}</td><td>${fmtDate(t.out.date)}</td><td><b>${fmtAmt(t.amount)}</b></td><td>${esc(bankName(t.out))}</td><td>${esc(bankName(t.in))}</td></tr>`).join('')}</table></section>`;
+  if(d.undated.length)h+=`<section class="sec"><h2>8. Screenshot jin ki tareekh nahi parhi gayi (${d.undated.length})</h2><p class="say">In ki tareekh Screenshots tab mein theek kar dein, phir ye sahi hisse mein chale jayenge.</p><table><tr><th>#</th><th>Amount</th><th>Bhejne wala</th><th>Screenshot</th></tr>${d.undated.map((e,i)=>`<tr><td>${i+1}</td><td><b>${fmtAmt(e.amount)}</b></td><td>${esc(e.sender||'—')}</td><td>${o.shots&&e.img?`<img class="ss" src="${e.img}">`:''}</td></tr>`).join('')}</table></section>`;
+  return `<div class="rp">${h}<div class="sign"><span>Tayyar karne wala</span><span>Tasdeeq karne wala</span></div></div>`;
+}
+function waFull(){const d=fullData();const day=rangeLabel();const ic={ok:'✅',bad:'❌',warn:'🟡'};
+  let t=`*Mukammal report* — ${day}\n\n`;
+  d.secs.forEach((s,i)=>{t+=`${ic[s.cls]} *${i+1}. ${s.title}*: ${s.n}, ${fmtAmt(s.amt)}\n`;s.its.forEach((it,j)=>{t+=`   ${j+1}) ${fmtAmt(it.amt)} — ${(it.h&&it.h.name)||(it.e&&it.e.sender)||(it.r&&party(it.r).name)||'?'} — ${it.date?fmtDate(it.date):'?'}\n`});t+='\n'});
+  t+=`💸 *6. Cash out*: ${d.cash.length}, ${fmtAmt(d.cash.reduce((a,r)=>a+r.debit,0))}\n`;d.cash.forEach((r,j)=>{t+=`   ${j+1}) ${fmtAmt(r.debit)} — ${cashCat(r)} — ${fmtDate(r.date)}\n`});
+  if(d.xfers.length)t+=`\n🔁 *7. Apne accounts ke transfer*: ${d.xfers.length}\n`;
+  if(d.undated.length)t+=`\n⚠️ *8. Bina tareekh screenshots*: ${d.undated.length}\n`;
+  return t}
+
 /* ============ zubaan: Roman Urdu / English ============ */
 let LANG='ur';
 const LX=new Map([
@@ -1745,7 +1819,16 @@ const LX=new Map([
 ['Kisi line par tap karein to statement mein wahi line khul jayegi. Talash ki sab lines statement par neeli ho jati hain.','Tap a line to open it on the statement. All search hits turn blue on the statement.'],
 ['Statement mein','In statement'],['Screenshots mein','In screenshots'],
 ['Screenshot tasdeeq','Screenshot verification'],['Banks ke darmiyan transfer','Transfers between banks'],['Sirf bina screenshot credits','Only credits without screenshot'],
-['App install karein','Install app'],['Bank Checker install karein','Install Bank Checker'],['Chrome ne abhi khud install ka button nahi diya. Ye is tarah ho jayega:','Chrome has not offered its own install button yet. Do it like this:'],['Band karo','Close'],['Double likhi','Written twice'],
+['App install karein','Install app'],['Mukammal report (sab kuch, alag alag hisse)','Complete report (everything, separate sections)'],['Mukammal report','Complete report'],
+['Mil gayi: ledger, screenshot aur bank teeno mein','Matched: in ledger, screenshot and bank'],['Screenshot hai, magar ledger mein record nahi','Screenshot exists, but not recorded in ledger'],
+['Ledger aur screenshot hai, magar bank statement mein nahi','In ledger and screenshot, but not in bank statement'],['Statement mein hai, magar ledger ya screenshot nahi','In statement, but missing ledger or screenshot'],
+['Ledger mein hai, magar na screenshot na statement','In ledger, but no screenshot and not in statement'],['Cash out (bank se nikla)','Cash out (left the bank)'],['Apne accounts ke darmiyan transfer','Transfers between own accounts'],
+['Screenshot jin ki tareekh nahi parhi gayi','Screenshots whose date was not read'],['Hissa','Section'],['Entries','Entries'],['Raqam','Amount'],
+['Is report mein chuni hui tareekh ka sara data hai. Har entry sirf ek hisse mein aati hai, aur har hissa alag page par print hota hai.','This report has all data for the selected dates. Each entry appears in exactly one section, and each section prints on its own page.'],
+['Hisaab mein abhi koi entry nahi likhi, is liye har screenshot "ledger mein record nahi" mein aayega.','No ledger entries yet, so every screenshot will appear under "not recorded in ledger".'],
+['Hisaab','Ledger'],['Hisaab mein nahi','Not in ledger'],['Screenshot nahi','No screenshot'],['Statement mein nahi','Not in statement'],['Statement nahi daali','No statement uploaded'],
+['Bheji gayi raqam ke screenshots','Screenshots of money sent'],['Kahan se','From'],['Kahan','To'],
+['In ki tareekh Screenshots tab mein theek kar dein, phir ye sahi hisse mein chale jayenge.','Fix their date in the Screenshots tab and they will move to the right section.'],['Bank Checker install karein','Install Bank Checker'],['Chrome ne abhi khud install ka button nahi diya. Ye is tarah ho jayega:','Chrome has not offered its own install button yet. Do it like this:'],['Band karo','Close'],['Double likhi','Written twice'],
 ['Hisaab ki tareekh ki gunjaish (din)','Ledger date tolerance (days)'],
 ['Hisaab mein likhi tareekh aksar payment wale din ki nahi hoti. 7 (default) = hisaab ki raqam 7 din aage/peechhe tak ke screenshot ya bank line se mil jayegi; sab se qareeb wali tareekh pehle chuni jaati hai. Agar naam bhi milta ho to 35 din tak ka farq chal jata hai.','The date written in the ledger is often not the payment day. 7 (default) = a ledger amount matches a screenshot or bank line up to 7 days before/after; the closest date is picked first. If the name matches too, up to 35 days apart is allowed.'],
 ['Purani bina-screenshot entries Hisaab mein muntaqil kar di gayin','Old no-screenshot entries moved to the Ledger'],['Bank Checker install ho gaya','Bank Checker installed'],
@@ -1901,6 +1984,9 @@ const LR=[
 [/^(\d+) double screenshot \(ek hi payment do dafa\):$/,'$1 duplicate screenshots (same payment twice):'],
 [/(\d+) raqam hisaab mein double likhi hai/g,'$1 amounts written twice in ledger'],
 [/^(.+?) ki koi line(.*?)\s*statement mein nahi hai\.$/,(m,a,b)=>`No statement line for ${a}${b.trim()?' '+b.trim():''}.`],
+[/^(\d+)\. (.+?) \((\d+)\) — (Rs [\d,.]+)$/,(m,n,t,c,a)=>`${n}. ${trText(t)} (${c}) — ${a}`],
+[/^(\d+)\. (.+?) \((\d+)\)$/,(m,n,t,c)=>`${n}. ${trText(t)} (${c})`],
+[/\*Mukammal report\*/g,'*Complete report*'],
 [/^Sirf (.+)$/,'Only $1']
 ];
 function trText(s){
