@@ -1788,11 +1788,12 @@ function fullItems(){
   return {items,undated,outShots,cash:cashOutRows(),xfers:transfersFor()};
 }
 const FULL_SECS=[
-  ['LSB','Mil gayi: ledger, screenshot aur bank teeno mein','ok',['LSB']],
+  ['LSB','Hisaab, screenshot aur bank statement mein mil gayi','ok',['LSB']],
+  ['LB','Hisaab aur bank statement mein mil gayi (screenshot zaroori nahi)','ok',['LB']],
   ['S','Screenshot hai, magar ledger mein record nahi','bad',['SB','S']],
   ['LS','Ledger aur screenshot hai, magar bank statement mein nahi','bad',['LS']],
-  ['B','Statement mein hai, magar ledger ya screenshot nahi','warn',['LB','B']],
-  ['L','Ledger mein hai, magar na screenshot na statement','bad',['L']]
+  ['B','DANGEROUS: Statement mein entry hai, magar hisaab aur screenshot dono mein nahi','bad',['B']],
+  ['L','Hisaab mein hai, magar bank statement mein nahi','bad',['L']]
 ];
 function fullData(){const d=fullItems();const secs=FULL_SECS.map(([id,title,cls,ks])=>{const its=d.items.filter(i=>ks.includes(i.k));return {id,title,cls,its,n:its.length,amt:its.reduce((a,i)=>a+i.amt,0)}});return {...d,secs}}
 function fullRow(it,i,o){
@@ -1812,8 +1813,10 @@ function buildFullReport(o){
     (d.undated.length?`<tr><td>8</td><td class="bad">Screenshot jin ki tareekh nahi parhi gayi</td><td>${d.undated.length}</td><td><b>${fmtAmt(d.undated.reduce((a,e)=>a+(+e.amount||0),0))}</b></td></tr>`:'');
   const seenVerifiedRows=new Set();
   const verifiedItems=d.items.filter(it=>{
-    const e=it.e,r=it.r;
-    if(!e||!r||e.status!=='matched'||e.dir==='out'||!creditRow(r)||RT.dupE.has(e.id)||seenVerifiedRows.has(r.id))return false;
+    const h=it.h,r=it.r;
+    // Verification requires a matching Hisaab entry and bank-statement credit.
+    // A screenshot/entry image is optional and must not affect verification.
+    if(!h||!r||!(+h.amount>0)||!creditRow(r)||RT.dupH.has(h.id)||seenVerifiedRows.has(r.id))return false;
     seenVerifiedRows.add(r.id);return true;
   });
   const bankOfItem=it=>(it.r&&bankName(it.r))||(it.e&&it.e.bank)||(it.h&&it.h.bank)||'Bank maloom nahi';
@@ -1822,15 +1825,23 @@ function buildFullReport(o){
   const orderedBanks=[...bankGroups.entries()].sort((a,b)=>b[1].length-a[1].length||a[0].localeCompare(b[0]));
   const bankSummary=orderedBanks.map(([b,its])=>{
     const valid=its.filter(it=>verifiedItems.includes(it));
-    return `<tr><td>${esc(b)}</td><td>${its.length}</td><td>${valid.length}</td><td><b>${fmtAmt(valid.reduce((a,it)=>a+(+it.amt||0),0))}</b></td><td>${fmtAmt(its.reduce((a,it)=>a+(+it.amt||0),0))}</td></tr>`;
+    const bankRows=new Map();for(const it of its){if(it.r&&creditRow(it.r)&&!bankRows.has(it.r.id))bankRows.set(it.r.id,it.r)}
+    const bankDepositTotal=[...bankRows.values()].reduce((a,r)=>a+(+rowCredit(r)||0),0);
+    return `<tr><td>${esc(b)}</td><td>${bankRows.size}</td><td>${valid.length}</td><td><b>${fmtAmt(bankDepositTotal)}</b></td><td><b class="ok">${fmtAmt(valid.reduce((a,it)=>a+(+it.amt||0),0))}</b></td></tr>`;
   }).join('');
   const totalVerified=verifiedItems.reduce((a,it)=>a+(+it.amt||0),0);
+  // Count every unique incoming credit visible in the selected bank statements.
+  // Transfers between own accounts are excluded by creditRow().
+  const statementDepositRows=new Map();
+  for(const it of d.items){if(it.r&&creditRow(it.r)&&!statementDepositRows.has(it.r.id))statementDepositRows.set(it.r.id,it.r)}
+  const totalStatementDeposits=[...statementDepositRows.values()].reduce((a,r)=>a+(+rowCredit(r)||0),0);
+  const statementDepositCount=statementDepositRows.size;
+  const matchPercent=totalStatementDeposits>0?Math.min(100,(totalVerified/totalStatementDeposits)*100):0;
   const transferTotal=d.xfers.reduce((a,x)=>a+(+x.amount||0),0);
   const allEntries=d.items.length+d.cash.length+d.xfers.length+d.outShots.length+d.undated.length;
   let h=rpHead('Mukammal report')+`<p class="say">Is report mein chuni hui tareekh ka sara data hai. Har entry sirf ek hisse mein aati hai, aur har hissa alag page par print hota hai.</p>
-    <div class="sum"><div>Total Number of Entries<b>${allEntries}</b></div><div>Total Account Cash<b class="ok">${fmtAmt(totalVerified)}</b>${verifiedItems.length} verified deposits</div><div>Total Bank Deposits<b>${fmtAmt(totalVerified)}</b>${verifiedItems.length} verified entries</div><div>Total Bank Transfers<b>${fmtAmt(transferTotal)}</b>${d.xfers.length} transfers</div><div>Total Cash Out<b>${fmtAmt(cashTot)}</b>${d.cash.length} transactions</div></div>
-    <table><tr><th>#</th><th>Hissa</th><th>Entries</th><th>Raqam</th></tr>${sumRows}</table>
-    <h2>Bank-wise transaction summary</h2><table><tr><th>Bank</th><th>Total Entries</th><th>Verified Deposits</th><th>Verified Deposit Total</th><th>Bank Transaction Total</th></tr>${bankSummary||'<tr><td colspan="5">No bank entries</td></tr>'}</table>`;
+    <div class="sum"><div>Total Number of Entries<b>${allEntries}</b></div><div>Total Bank Deposits<b>${fmtAmt(totalStatementDeposits)}</b>${statementDepositCount} statement credits</div><div>Matched Deposits<b class="ok">${fmtAmt(totalVerified)}</b>${verifiedItems.length} matched · ${matchPercent.toFixed(1)}% by amount</div><div>Unmatched Deposit Amount<b class="bad">${fmtAmt(Math.max(0,totalStatementDeposits-totalVerified))}</b>Statement total minus matched total</div><div>Total Account Cash<b class="ok">${fmtAmt(totalVerified)}</b>Verified deposits only</div><div>Total Bank Transfers<b>${fmtAmt(transferTotal)}</b>${d.xfers.length} transfers</div><div>Total Cash Out<b>${fmtAmt(cashTot)}</b>${d.cash.length} transactions</div></div>`+`<table><tr><th>#</th><th>Hissa</th><th>Entries</th><th>Raqam</th></tr>${sumRows}</table>
+    <h2>Bank-wise transaction summary</h2><table><tr><th>Bank</th><th>Total Deposits</th><th>Matched Deposits</th><th>Statement Deposit Total</th><th>Matched Amount</th></tr>${bankSummary||'<tr><td colspan="5">No bank entries</td></tr>'}</table>`;
   if(!(state.hisaab||[]).length)h+=`<p class="say">Hisaab mein abhi koi entry nahi likhi, is liye har screenshot "ledger mein record nahi" mein aayega.</p>`;
   orderedBanks.forEach(([bank,its],i)=>{
     const verified=its.filter(it=>verifiedItems.includes(it));
