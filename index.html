@@ -1079,7 +1079,7 @@ function renderDash(){
   $('#helpBox').style.display=state.entries.length&&state.statements.length?'none':'';
   const grp=(key)=>{const g={};for(const e of es){const k=key(e)||'—';(g[k]=g[k]||{n:0,a:0,m:0}).n++;g[k].a+=+e.amount||0;if(e.status==='matched')g[k].m++}return Object.entries(g)};
   const tbl=(rows,h)=>rows.length?`<div class="tscroll"><table class="t"><tr><th>${h}</th><th class="n">Screenshots</th><th class="n">Mile</th><th class="n">Amount</th></tr>${rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${v.n}</td><td class="n${v.m<v.n?' rub':''}">${v.m}</td><td class="n">${fmtAmt(v.a)}</td></tr>`).join('')}</table></div>`:'<div class="empty">Abhi kuch nahi.</div>';
-  $('#dashBanks').innerHTML=tbl(grp(e=>e.bank).sort((a,b)=>b[1].a-a[1].a),'Bank');
+  $('#dashBanks').innerHTML=tbl(grp(reportBankForEntry).sort((a,b)=>b[1].n-a[1].n||a[0].localeCompare(b[0])),'Bank');
   $('#dashDates').innerHTML=tbl(grp(e=>e.date).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,v])=>[k==='—'?'—':fmtDate(k),v]),'Tareekh');
   $('#orphCount').textContent=orph.length?`(${orph.length})`:'';
   renderMoneyMoves();
@@ -1290,20 +1290,64 @@ function reportData(){
   const sum=a=>a.reduce((s,e)=>s+(+e.amount||0),0);
   return {es,m:es.filter(e=>e.status==='matched'),u:es.filter(e=>e.status==='unmatched'),sum,orph:rOrphans()};
 }
+function reportBankForEntry(e){
+  const r=e.match&&RT.rows.get(e.match.rowId);
+  return (r&&bankName(r))||e.bank||'Bank maloom nahi';
+}
+function verifiedDepositEntries(es){
+  const seenRows=new Set();
+  return es.filter(e=>{
+    if(e.status!=='matched'||e.dir==='out'||RT.dupE.has(e.id))return false;
+    const r=e.match&&RT.rows.get(e.match.rowId);
+    if(!r||!creditRow(r)||!(+e.amount>0)||seenRows.has(r.id))return false;
+    seenRows.add(r.id);
+    return true;
+  });
+}
 function buildReport(opts){
   const {es,m,u,sum,orph}=reportData();const S=state.settings;
+  const verified=verifiedDepositEntries(es);
+  const verifiedTotal=sum(verified);
+  const transfers=transfersFor();
+  const cash=cashOutRows();
+  const transferTotal=transfers.reduce((a,t)=>a+(+t.amount||0),0);
+  const cashTotal=cash.reduce((a,r)=>a+(+r.debit||0),0);
+  const groups=new Map();
+  for(const e of es){
+    const bank=reportBankForEntry(e);
+    if(!groups.has(bank))groups.set(bank,{entries:[],verified:[]});
+    const g=groups.get(bank);g.entries.push(e);
+    if(verified.includes(e))g.verified.push(e);
+  }
+  const ordered=[...groups.entries()].sort((a,b)=>b[1].entries.length-a[1].entries.length||a[0].localeCompare(b[0]));
   const head=`<h1>${esc(S.biz||'Bank Tasdeeq Report')}</h1>
    <div class="sub">${S.biz?'Bank Tasdeeq Report, ':''}${RB?'<b>'+esc(rbName())+'</b>, ':''}${esc(rangeLabel())}, Banai gai: ${new Date().toLocaleString('en-GB')}<br>
-   Statements: ${state.statements.filter(s=>!RB||s.id===RB).map(s=>esc((s.bank?s.bank+' — ':'')+s.name)).join(', ')||'—'}</div>
-   <div class="sum"><div>Kul entries<b>${es.length}</b>${fmtAmt(sum(es))}</div><div>Statement me mili<b class="ok">${m.length}</b>${fmtAmt(sum(m))}</div><div>Nahi mili<b class="bad">${u.length}</b>${fmtAmt(sum(u))}</div>${opts.orph?`<div>Credit bina screenshot<b>${orph.length}</b>${fmtAmt(orph.reduce((s,r)=>s+(rowCredit(r)||0),0))}</div>`:''}</div>`;
+   Statements: ${state.statements.filter(s=>!RB||s.id===RB).map(s=>esc((s.bank?s.bank+' — ':'')+s.name)).join(', ')||'—'}</div>`;
+  const bankSummary=ordered.map(([bank,g])=>`<tr><td>${esc(bank)}</td><td>${g.entries.length}</td><td>${g.verified.length}</td><td><b>${fmtAmt(sum(g.verified))}</b></td><td>${fmtAmt(sum(g.entries))}</td></tr>`).join('');
+  const summary=`<div class="sum">
+    <div>Total Number of Entries<b>${es.length}</b>${fmtAmt(sum(es))}</div>
+    <div>Total Account Cash<b class="ok">${fmtAmt(verifiedTotal)}</b>${verified.length} verified deposits</div>
+    <div>Total Bank Deposits<b>${fmtAmt(verifiedTotal)}</b>${verified.length} verified entries</div>
+    <div>Total Bank Transfers<b>${fmtAmt(transferTotal)}</b>${transfers.length} transfers</div>
+    <div>Total Cash Out<b>${fmtAmt(cashTotal)}</b>${cash.length} transactions</div>
+    <div>Statement me mili<b class="ok">${m.length}</b>${fmtAmt(sum(m))}</div>
+    <div>Nahi mili<b class="bad">${u.length}</b>${fmtAmt(sum(u))}</div>
+    ${opts.orph?`<div>Credit bina screenshot<b>${orph.length}</b>${fmtAmt(orph.reduce((s,r)=>s+(rowCredit(r)||0),0))}</div>`:''}
+   </div>
+   <h2>Bank-wise transaction summary</h2>
+   <table><tr><th>Bank</th><th>Total Entries</th><th>Verified Deposits</th><th>Verified Deposit Total</th><th>All Entry Amount</th></tr>${bankSummary||'<tr><td colspan="5">No bank entries</td></tr>'}</table>`;
   const ncol=6+(opts.shots?1:0);
-  const body=es.length?`<table><tr><th>#</th>${opts.shots?'<th>Screenshot</th>':''}<th>Date</th><th>Amount</th><th>Bhejne wala / Bank</th><th class="ref">Ref</th><th>Status &amp; Statement</th></tr>
-    ${es.map((e,i)=>{const r=e.match&&RT.rows.get(e.match.rowId);return `<tbody class="pair"><tr><td>${i+1}</td>${opts.shots?`<td>${e.img?`<img class="ss" src="${e.img}">`:'Manual'}</td>`:''}<td>${e.date?fmtDate(e.date):(r?fmtDate(r.date)+'<br><small>(statement se)</small>':'—')}</td><td><b>${fmtAmt(e.amount)}</b>${e.dir==='out'?'<br><small>(gayi)</small>':''}</td><td>${esc(e.sender||(r&&party(r).name)||'—')}<br><small>${esc(e.bank||(r&&party(r).bank)||'—')}</small></td><td class="ref">${esc(e.ref||'—')}</td>
+  const entryTable=entries=>entries.length?`<table><tr><th>#</th>${opts.shots?'<th>Screenshot</th>':''}<th>Date</th><th>Amount</th><th>Bhejne wala / Bank</th><th class="ref">Ref</th><th>Status &amp; Statement</th></tr>
+    ${entries.map((e,i)=>{const r=e.match&&RT.rows.get(e.match.rowId);return `<tbody class="pair"><tr><td>${i+1}</td>${opts.shots?`<td>${e.img?`<img class="ss" src="${e.img}">`:'Manual'}</td>`:''}<td>${e.date?fmtDate(e.date):(r?fmtDate(r.date)+'<br><small>(statement se)</small>':'—')}</td><td><b>${fmtAmt(e.amount)}</b>${e.dir==='out'?'<br><small>(gayi)</small>':''}</td><td>${esc(e.sender||(r&&party(r).name)||'—')}<br><small>${esc(e.bank||(r&&party(r).bank)||'—')}</small></td><td class="ref">${esc(e.ref||'—')}</td>
       <td>${r?`<span class="ok">✓ Statement me mili</span> <span class="stmtline">${esc(stmtOf(r).bank||stmtOf(r).name)}, page ${r.page}<br>Txn ${fmtDate(r.date)}${r.vdate?', Value '+fmtDate(r.vdate):''}</span>`:e.status==='unmatched'?'<span class="bad">✗ Statement me nahi mili</span>':'Statement baqi'}${RT.dupE.has(e.id)?`<br><span class="bad">Double: #${RT.dupE.get(e.id).n} jaisa</span>`:''}${(state.hisaab||[]).length&&e.dir!=='out'?(RT.hByEntry.has(e.id)?'<br><span class="ok">✓ Hisaab mein likha hai</span>':'<br><span class="bad">✗ Hisaab mein nahi likha</span>'):''}
-      </td></tr>${r&&opts.crops?`<tr class="croprow"><td></td><td colspan="${ncol-1}"><img class="crop" src="${cropRow(r)}" alt="Statement ki line"></td></tr>`:''}</tbody>`}).join('')}</table>`:'<p>Is din ki koi entry nahi.</p>';
+      </td></tr>${r&&opts.crops?`<tr class="croprow"><td></td><td colspan="${ncol-1}"><img class="crop" src="${cropRow(r)}" alt="Statement ki line"></td></tr>`:''}</tbody>`}).join('')}</table>`:'<p>Is bank ki koi entry nahi.</p>';
+  let body='';
+  ordered.forEach(([bank,g],i)=>{
+    body+=`<section class="sec"><h2>${i+1}. ${esc(bank)} (${g.entries.length} entries) — Verified deposits: ${fmtAmt(sum(g.verified))}</h2>${entryTable(g.entries)}</section>`;
+  });
   const lo=dayLeftovers();const noteH=lo.total?`<div class="note">${esc(lo.text)}</div>`:'';
   const orphT=opts.orph&&orph.length?`<h2>Statement me credit hai, lekin screenshot nahi mila (${orph.length})</h2><table><tr><th>#</th><th>Transaction Date</th><th>Value Date</th><th>Naam</th><th>Bank</th><th>Credit</th></tr>${orph.map((r,i)=>`<tr><td>${i+1}</td><td>${fmtDate(r.date)}</td><td>${vdCell(r)}</td><td>${esc(party(r).name||'—')}</td><td>${esc(party(r).bank||'—')}<br><small>${esc(stmtOf(r).bank||'')} mein, page ${r.page}</small></td><td>${fmtAmt(rowCredit(r))}</td></tr>`).join('')}</table>`:'';
-  return `<div class="rp">${head}${noteH}${body}${orphT}<div class="sign"><span>Tayyar karne wala</span><span>Tasdeeq karne wala</span></div></div>`;
+  return `<div class="rp">${head}${summary}${noteH}${body}${orphT}<div class="sign"><span>Tayyar karne wala</span><span>Tasdeeq karne wala</span></div></div>`;
 }
 function reportOpts(){return {crops:$('#rCrops').checked,shots:$('#rShots').checked,orph:$('#rOrph').checked}}
 let repSeq=0;
@@ -1766,16 +1810,42 @@ function buildFullReport(o){
     `<tr><td>6</td><td>Cash out (bank se nikla)</td><td>${d.cash.length}</td><td><b>${fmtAmt(cashTot)}</b></td></tr>`+
     (d.xfers.length?`<tr><td>7</td><td>Apne accounts ke darmiyan transfer</td><td>${d.xfers.length}</td><td><b>${fmtAmt(d.xfers.reduce((a,x)=>a+x.amount,0))}</b></td></tr>`:'')+
     (d.undated.length?`<tr><td>8</td><td class="bad">Screenshot jin ki tareekh nahi parhi gayi</td><td>${d.undated.length}</td><td><b>${fmtAmt(d.undated.reduce((a,e)=>a+(+e.amount||0),0))}</b></td></tr>`:'');
+  const seenVerifiedRows=new Set();
+  const verifiedItems=d.items.filter(it=>{
+    const e=it.e,r=it.r;
+    if(!e||!r||e.status!=='matched'||e.dir==='out'||!creditRow(r)||RT.dupE.has(e.id)||seenVerifiedRows.has(r.id))return false;
+    seenVerifiedRows.add(r.id);return true;
+  });
+  const bankOfItem=it=>(it.r&&bankName(it.r))||(it.e&&it.e.bank)||(it.h&&it.h.bank)||'Bank maloom nahi';
+  const bankGroups=new Map();
+  for(const it of d.items){const b=bankOfItem(it);if(!bankGroups.has(b))bankGroups.set(b,[]);bankGroups.get(b).push(it)}
+  const orderedBanks=[...bankGroups.entries()].sort((a,b)=>b[1].length-a[1].length||a[0].localeCompare(b[0]));
+  const bankSummary=orderedBanks.map(([b,its])=>{
+    const valid=its.filter(it=>verifiedItems.includes(it));
+    return `<tr><td>${esc(b)}</td><td>${its.length}</td><td>${valid.length}</td><td><b>${fmtAmt(valid.reduce((a,it)=>a+(+it.amt||0),0))}</b></td><td>${fmtAmt(its.reduce((a,it)=>a+(+it.amt||0),0))}</td></tr>`;
+  }).join('');
+  const totalVerified=verifiedItems.reduce((a,it)=>a+(+it.amt||0),0);
+  const transferTotal=d.xfers.reduce((a,x)=>a+(+x.amount||0),0);
+  const allEntries=d.items.length+d.cash.length+d.xfers.length+d.outShots.length+d.undated.length;
   let h=rpHead('Mukammal report')+`<p class="say">Is report mein chuni hui tareekh ka sara data hai. Har entry sirf ek hisse mein aati hai, aur har hissa alag page par print hota hai.</p>
-    <table><tr><th>#</th><th>Hissa</th><th>Entries</th><th>Raqam</th></tr>${sumRows}</table>`;
+    <div class="sum"><div>Total Number of Entries<b>${allEntries}</b></div><div>Total Account Cash<b class="ok">${fmtAmt(totalVerified)}</b>${verifiedItems.length} verified deposits</div><div>Total Bank Deposits<b>${fmtAmt(totalVerified)}</b>${verifiedItems.length} verified entries</div><div>Total Bank Transfers<b>${fmtAmt(transferTotal)}</b>${d.xfers.length} transfers</div><div>Total Cash Out<b>${fmtAmt(cashTot)}</b>${d.cash.length} transactions</div></div>
+    <table><tr><th>#</th><th>Hissa</th><th>Entries</th><th>Raqam</th></tr>${sumRows}</table>
+    <h2>Bank-wise transaction summary</h2><table><tr><th>Bank</th><th>Total Entries</th><th>Verified Deposits</th><th>Verified Deposit Total</th><th>Bank Transaction Total</th></tr>${bankSummary||'<tr><td colspan="5">No bank entries</td></tr>'}</table>`;
   if(!(state.hisaab||[]).length)h+=`<p class="say">Hisaab mein abhi koi entry nahi likhi, is liye har screenshot "ledger mein record nahi" mein aayega.</p>`;
-  d.secs.forEach((s,i)=>{if(!s.n)return;
-    h+=`<section class="sec"><h2>${i+1}. ${esc(s.title)} (${s.n}) — ${fmtAmt(s.amt)}</h2><table><tr><th>#</th><th>Tareekh</th><th>Amount</th><th>Naam / Bank</th><th>Ledger</th><th>Screenshot</th><th>Bank statement</th></tr>${s.its.map((it,j)=>fullRow(it,j,o)).join('')}</table></section>`});
+  orderedBanks.forEach(([bank,its],i)=>{
+    const verified=its.filter(it=>verifiedItems.includes(it));
+    h+=`<section class="sec"><h2>${i+1}. ${esc(bank)} (${its.length} entries) — Verified deposits: ${fmtAmt(verified.reduce((a,it)=>a+(+it.amt||0),0))}</h2><table><tr><th>#</th><th>Tareekh</th><th>Amount</th><th>Naam / Bank</th><th>Ledger</th><th>Screenshot</th><th>Bank statement</th></tr>${its.map((it,j)=>fullRow(it,j,o)).join('')}</table></section>`;
+  });
   if(d.cash.length||d.outShots.length){
-    const g={};for(const r of d.cash){const c=cashCat(r);(g[c]=g[c]||{n:0,a:0,rows:[]}).n++;g[c].a+=r.debit;g[c].rows.push(r)}
-    h+=`<section class="sec"><h2>6. Cash out (bank se nikla) (${d.cash.length}) — ${fmtAmt(cashTot)}</h2>`;
-    for(const [cat,v] of Object.entries(g).sort((a,b)=>b[1].a-a[1].a))
-      h+=`<h3>${esc(cat)} — ${fmtAmt(v.a)} (${v.n})</h3><table><tr><th>#</th><th>Transaction Date</th><th>Bank</th><th>Kis ko / kya</th><th>Amount</th></tr>${v.rows.map((r,i)=>`<tbody class="pair"><tr><td>${i+1}</td><td>${fmtDate(r.date)}</td><td>${esc(bankName(r))}<br><small>page ${r.page}</small></td><td>${esc(partyText(r))}</td><td><b>${fmtAmt(r.debit)}</b></td></tr>${o.crops?`<tr class="croprow"><td></td><td colspan="4"><img class="crop" src="${cropRow(r)}" alt=""></td></tr>`:''}</tbody>`).join('')}</table>`;
+    const cashBanks=new Map();for(const r of d.cash){const b=bankName(r)||'Bank maloom nahi';if(!cashBanks.has(b))cashBanks.set(b,[]);cashBanks.get(b).push(r)}
+    const orderedCashBanks=[...cashBanks.entries()].sort((a,b)=>b[1].length-a[1].length||a[0].localeCompare(b[0]));
+    h+=`<section class="sec"><h2>Cash out (bank se nikla) (${d.cash.length}) — ${fmtAmt(cashTot)}</h2>`;
+    for(const [bank,rows] of orderedCashBanks){
+      const cats={};for(const r of rows){const c=cashCat(r);if(!cats[c])cats[c]=[];cats[c].push(r)}
+      h+=`<h3>${esc(bank)} (${rows.length}) — ${fmtAmt(rows.reduce((a,r)=>a+r.debit,0))}</h3>`;
+      for(const [cat,rs] of Object.entries(cats).sort((a,b)=>b[1].reduce((x,r)=>x+r.debit,0)-a[1].reduce((x,r)=>x+r.debit,0)))
+        h+=`<h3>${esc(cat)} — ${fmtAmt(rs.reduce((a,r)=>a+r.debit,0))} (${rs.length})</h3><table><tr><th>#</th><th>Transaction Date</th><th>Bank</th><th>Kis ko / kya</th><th>Amount</th></tr>${rs.map((r,i)=>`<tbody class="pair"><tr><td>${i+1}</td><td>${fmtDate(r.date)}</td><td>${esc(bankName(r))}<br><small>page ${r.page}</small></td><td>${esc(partyText(r))}</td><td><b>${fmtAmt(r.debit)}</b></td></tr>${o.crops?`<tr class="croprow"><td></td><td colspan="4"><img class="crop" src="${cropRow(r)}" alt=""></td></tr>`:''}</tbody>`).join('')}</table>`;
+    }
     if(d.outShots.length)h+=`<h3>Bheji gayi raqam ke screenshots (${d.outShots.length})</h3><table><tr><th>#</th><th>Tareekh</th><th>Amount</th><th>Kis ko</th><th>Bank statement</th></tr>${d.outShots.map((e,i)=>{const r=e.match&&RT.rows.get(e.match.rowId);return `<tr><td>${i+1}</td><td>${fmtDate(edate(e))}</td><td><b>${fmtAmt(e.amount)}</b></td><td>${esc(e.sender||'—')}</td><td>${r?`<span class="ok">✓</span> ${esc(bankName(r))}, page ${r.page}`:'<span class="bad">✗</span>'}</td></tr>`}).join('')}</table>`;
     h+='</section>';
   }
