@@ -310,6 +310,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);margin-top:8px}
 .rp .sign{margin-top:44px;display:flex;justify-content:space-between;font:13px "Mukta",system-ui,sans-serif}
 .rp .sign span{border-top:1px solid #16213A;padding-top:4px;min-width:180px;text-align:center}
 @media print{
+  .rp .section-summary-print-hide{display:none!important}
   body{background:#fff}
   header.top,nav,.noprint,.tab:not(#tab-report){display:none!important}
   #tab-report{display:block!important}
@@ -454,6 +455,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);margin-top:8px}
   <!-- HISAAB -->
   <section class="tab on" id="tab-dash">
     <div id="dashStats"></div>
+    <div style="margin-top:28px"><h2>Rozana bank balance reconciliation</h2><div id="dashBalances"></div></div>
     <div style="margin-top:28px"><h2>Mera hisaab: screenshot aur bank se milan</h2><div id="dashHisaab"></div></div>
     <div class="grid g2 dash-cols">
       <div><h2>Bank ke hisaab se</h2><div id="dashBanks"></div></div>
@@ -621,7 +623,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);margin-top:8px}
           <div style="flex:1"><label class="f">Transaction Date tolerance (din)</label><input type="number" id="sDay" min="0" max="7"></div>
           <div style="flex:1"><label class="f">Amount tolerance (Rs)</label><input type="number" id="sAmt" min="0" step="0.5"></div>
         </div>
-        <p class="sm muted">Sirf statement ki <b>Transaction Date</b> dekhi jati hai; Value Date hamesha chhor di jati hai. 0 (default) = sirf usi Transaction Date par. 1 = ek din aage/peechhe bhi.</p>
+        <p class="sm muted">Matching mein Transaction Date aur Value / Working Date dono check hongi. Bank holiday ya weekend par posting date aglay working day ki ho to bhi entry mil sakti hai. 0 = dono dates mein se kisi ek ka exact match; 1 = ek din ka farq bhi.</p>
         <label class="f" style="margin-top:10px">Hisaab ki tareekh ki gunjaish (din)</label><input type="number" id="sHTol" min="0" max="60" style="max-width:140px">
         <p class="sm muted">Hisaab mein likhi tareekh aksar payment wale din ki nahi hoti. 7 (default) = hisaab ki raqam 7 din aage/peechhe tak ke screenshot ya bank line se mil jayegi; sab se qareeb wali tareekh pehle chuni jaati hai. Agar naam bhi milta ho to 35 din tak ka farq chal jata hai.</p>
       </div>
@@ -935,7 +937,9 @@ function scorePair(e,r){
   for(const [a,b] of rowAmts(r,e.dir))if(Math.abs(a-e.amount)<=tol+1e-9)base=Math.max(base,b);
   if(!base)return null;
   let score=base;const why=[];
-  if(e.date){if(!r.date)return null;const d=dayDiff(e.date,r.date);if(d>(+state.settings.dayTol||0))return null;score+=d===0?50:40-10*d;why.push(d===0?'same date':`${d} din farq`)}
+  if(e.date){const candidates=[['Transaction Date',r.date],['Value / Working Date',r.vdate]].filter(x=>x[1]);if(!candidates.length)return null;
+    candidates.sort((a,b)=>dayDiff(e.date,a[1])-dayDiff(e.date,b[1]));const [dateLabel,dateValue]=candidates[0];const d=dayDiff(e.date,dateValue);
+    if(d>(+state.settings.dayTol||0))return null;score+=d===0?50:40-10*d;why.push(`${dateLabel}${d===0?' match':` ${d} din farq`}`)}
   else why.push('screenshot me date nahi');
   const t=r.text.toLowerCase();
   const toks=(e.sender||'').toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>=3&&!['bank','limited','ltd','account','the','and','mr','mrs','pvt'].includes(w));
@@ -1043,6 +1047,7 @@ function renderAll(){
   $('#cEntries').textContent=state.entries.length||'';$('#cStmt').textContent=state.statements.length||'';
   $('#fromInput').value=state.ui.from||'';$('#toInput').value=state.ui.to||'';
   renderDash();renderEntries();renderStmtList();renderViewer();renderHisaab();
+  $('#dashBalances').innerHTML=renderDailyBalances();
   $('#dashHisaab').innerHTML=hisaabTally(true)||`<div class="empty">Apne register ya parchi ki raqamein <b>Hisaab</b> mein likhein. Phir yahan dikhega ke har raqam ka screenshot bhi hai aur woh bank mein bhi aayi ya nahi.</div><div class="next" style="justify-content:center"><button class="btn" data-go="hisaab">Hisaab mein likhein</button></div>`;
   if(state.ui.tab==='report')renderReport();
 }
@@ -1051,6 +1056,26 @@ const ICON={
   bad:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17v.5"/></svg>',
   wait:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/><path d="M12 7v5l3 2"/></svg>'
 };
+function renderDailyBalances(){
+  if(!state.statements.length)return '<div class="empty">Daily balance check ke liye bank statement upload karein.</div>';
+  const out=[];
+  for(const st of state.statements){
+    const rows=(st.rows||[]).filter(r=>r.date&&inRange(r.date)).slice().sort((a,b)=>a.date.localeCompare(b.date)||a.page-b.page||a.id.localeCompare(b.id));
+    const byDay=new Map();
+    for(const r of rows){const x=byDay.get(r.date)||{date:r.date,credit:0,debit:0,closing:null,hasBalance:false,rows:[]};
+      x.credit+=+r.credit||0;x.debit+=+r.debit||0;if(r.balance!=null){x.closing=+r.balance;x.hasBalance=true}x.rows.push(r);byDay.set(r.date,x)}
+    let previous=null,previousDate='',pendingNet=0;
+    for(const d of [...byDay.values()].sort((a,b)=>a.date.localeCompare(b.date))){
+      pendingNet+=d.credit-d.debit;
+      if(!d.hasBalance)continue;
+      const expected=previous==null?null:previous+pendingNet;const diff=expected==null?null:d.closing-expected;
+      out.push({bank:st.bank||st.name||'Bank',date:d.date,previous,previousDate,credit:d.credit,debit:d.debit,expected,closing:d.closing,diff});
+      previous=d.closing;previousDate=d.date;pendingNet=0;
+    }
+  }
+  if(!out.length)return '<div class="empty">Is statement mein balance column read nahi hua. PDF mein transaction-wise running balance hona zaroori hai. Transaction aur Value / Working Date matching phir bhi dono par kaam karegi.</div>';
+  return `<p class="sm muted">Har bank ka pichla available working-day closing balance + aaj ki credits − debits = system expected balance. Chhutti/weekend ke din statement mein na hon to pichla available bank date use hota hai. Pehle din ka opening balance statement se available na ho to difference calculate nahi hota.</p><div class="tscroll"><table class="t"><tr><th>Bank</th><th>Statement Date</th><th class="n">Previous Closing</th><th class="n">Credit</th><th class="n">Debit</th><th class="n">System Balance</th><th class="n">Statement Balance</th><th class="n">Difference</th></tr>${out.map(d=>`<tr><td>${esc(d.bank)}</td><td class="num">${fmtDate(d.date)}</td><td class="n">${d.previous==null?'—':fmtAmt(d.previous)}</td><td class="n">${fmtAmt(d.credit)}</td><td class="n">${fmtAmt(d.debit)}</td><td class="n">${d.expected==null?'Opening reference':fmtAmt(d.expected)}</td><td class="n">${fmtAmt(d.closing)}</td><td class="n ${d.diff==null?'muted':Math.abs(d.diff)>0.01?'bad':'ok'}">${d.diff==null?'—':fmtAmt(d.diff)}</td></tr>`).join('')}</table></div>`;
+}
 function renderDash(){
   const es=visibleEntries();const sum=a=>a.reduce((s,e)=>s+(+e.amount||0),0);
   const m=es.filter(e=>e.status==='matched'),u=es.filter(e=>e.status==='unmatched'),p=es.filter(e=>e.status==='pending'||e.status==='ocr');
@@ -1580,7 +1605,7 @@ function computeHisaab(){
   const pairs=[];
   for(const h of H){
     for(const r of rows){const a=rowCredit(r);if(a==null||Math.abs(a-h.amount)>tol+1e-9)continue;
-      const e=eByRow.get(r.id);const nh=nameHits(h.name,r.text+' '+(e?e.sender:''));const ds=dateScore(h.date,nh>0,r.date,e&&e.date);if(ds===null)continue;
+      const e=eByRow.get(r.id);const nh=nameHits(h.name,r.text+' '+(e?e.sender:''));const ds=dateScore(h.date,nh>0,r.date,r.vdate,e&&e.date);if(ds===null)continue;
       let sc=100+ds+(e?40:0)+Math.min(40,20*nh);
       if(h.bank&&(bankIn(r.text)===h.bank||(e&&e.bank===h.bank)))sc+=10;
       pairs.push({h,r,e,sc});}
@@ -1637,7 +1662,7 @@ function rowHMark(r){if(!(state.hisaab||[]).length)return '';return RT.hByRow&&R
 const creditsNotInHisaab=()=>[...RT.rows.values()].filter(r=>creditRow(r)&&inRange(r.date)&&!RT.hByRow.has(r.id));
 const shotsNotInHisaab=()=>visibleEntries().filter(e=>e.dir!=='out'&&e.amount>0&&!RT.hByEntry.has(e.id));
 function hisaabTally(withBtns){
-  const hs=visibleHisaab();if(!hs.length)return '';
+  const hs=visibleHisaab();const bankOnly=creditsNotInHisaab();if(!hs.length&&!bankOnly.length)return '';
   const sum=a=>a.reduce((s,h)=>s+(+h.amount||0),0);const by=k=>hs.filter(h=>hInfo(h).status===k);
   const full=by('full'),bank=by('bank'),ss=by('ss'),none=by('none'),wait=[...by('wait'),...by('sswait')];
   const L1=(n,cls,txt,a)=>n?`<span class="line ${cls}">${n} ${txt}: <span class="amt">${fmtAmt(a)}</span>.</span>`:'';
@@ -1649,10 +1674,11 @@ function hisaabTally(withBtns){
     L1(none.length,'bad','na screenshot mein, na bank mein',sum(none))+
     L1(wait.length,'wait','statement ka intezar',sum(wait))+'</p>';
   const extra=[];
-  if(state.statements.length&&cn.length)extra.push(`${cn.length} credit bank mein aaye jo hisaab mein nahi likhe (${fmtAmt(cn.reduce((a,r)=>a+(rowCredit(r)||0),0))})`);
+  if(state.statements.length&&cn.length)extra.push(`${cn.length} credit bank mein aaye jo aapke hisaab mein nahi hain (${fmtAmt(cn.reduce((a,r)=>a+(rowCredit(r)||0),0))}) — in entries ko verify karein.`);
   {const dh=hs.filter(h=>RT.dupH.has(h.id));if(dh.length)extra.push(`${dh.length} raqam hisaab mein double likhi hai (${fmtAmt(sum(dh))})`)}
   if(sn.length)extra.push(`${sn.length} screenshot hisaab mein nahi likhe (${fmtAmt(sn.reduce((a,e)=>a+(+e.amount||0),0))})`);
   if(extra.length)t+=`<p class="sm" style="margin:10px 0 0;color:var(--rubric)">${extra.map(esc).join('<br>')}</p>`;
+  if(bankOnly.length)t+=`<div class="tscroll" style="margin-top:12px"><table class="t"><tr><th>Transaction Date</th><th>Value / Working Date</th><th>Bank / Naam</th><th class="n">Statement Credit</th><th>Status</th></tr>${bankOnly.slice(0,100).map(r=>`<tr><td class="num">${fmtDate(r.date)}</td><td class="num">${r.vdate?fmtDate(r.vdate):'—'}</td><td>${esc(party(r).bank||bankName(r))}<br>${esc(party(r).name||'—')}</td><td class="n">${fmtAmt(rowCredit(r))}</td><td class="bad">Aapke hisaab mein nahi</td></tr>`).join('')}</table></div>`;
   if(withBtns)t+=`<div class="next">${(ss.length+none.length)?'<button class="btn pri" data-go="hisaab" data-hstatus="miss">Na milne wali dekhein</button>':''}<button class="btn" data-go="hisaab">Hisaab kholein</button><button class="btn" data-goreport="full">Mukammal report</button></div>`;
   return t;
 }
@@ -1840,7 +1866,7 @@ function buildFullReport(o){
   const transferTotal=d.xfers.reduce((a,x)=>a+(+x.amount||0),0);
   const allEntries=d.items.length+d.cash.length+d.xfers.length+d.outShots.length+d.undated.length;
   let h=rpHead('Mukammal report')+`<p class="say">Is report mein chuni hui tareekh ka sara data hai. Har entry sirf ek hisse mein aati hai, aur har hissa alag page par print hota hai.</p>
-    <div class="sum"><div>Total Number of Entries<b>${allEntries}</b></div><div>Total Bank Deposits<b>${fmtAmt(totalStatementDeposits)}</b>${statementDepositCount} statement credits</div><div>Matched Deposits<b class="ok">${fmtAmt(totalVerified)}</b>${verifiedItems.length} matched · ${matchPercent.toFixed(1)}% by amount</div><div>Unmatched Deposit Amount<b class="bad">${fmtAmt(Math.max(0,totalStatementDeposits-totalVerified))}</b>Statement total minus matched total</div><div>Total Account Cash<b class="ok">${fmtAmt(totalVerified)}</b>Verified deposits only</div><div>Total Bank Transfers<b>${fmtAmt(transferTotal)}</b>${d.xfers.length} transfers</div><div>Total Cash Out<b>${fmtAmt(cashTot)}</b>${d.cash.length} transactions</div></div>`+`<table><tr><th>#</th><th>Hissa</th><th>Entries</th><th>Raqam</th></tr>${sumRows}</table>
+    <div class="sum"><div>Total Number of Entries<b>${allEntries}</b></div><div>Total Bank Deposits<b>${fmtAmt(totalStatementDeposits)}</b>${statementDepositCount} statement credits</div><div>Matched Deposits<b class="ok">${fmtAmt(totalVerified)}</b>${verifiedItems.length} matched · ${matchPercent.toFixed(1)}% by amount</div><div>Unmatched Deposit Amount<b class="bad">${fmtAmt(Math.max(0,totalStatementDeposits-totalVerified))}</b>Statement total minus matched total</div><div>Total Account Cash<b class="ok">${fmtAmt(totalVerified)}</b>Verified deposits only</div><div>Total Bank Transfers<b>${fmtAmt(transferTotal)}</b>${d.xfers.length} transfers</div><div>Total Cash Out<b>${fmtAmt(cashTot)}</b>${d.cash.length} transactions</div></div>`+`<table class="section-summary-print-hide"><tr><th>#</th><th>Hissa</th><th>Entries</th><th>Raqam</th></tr>${sumRows}</table>
     <h2>Bank-wise transaction summary</h2><table><tr><th>Bank</th><th>Total Deposits</th><th>Matched Deposits</th><th>Statement Deposit Total</th><th>Matched Amount</th></tr>${bankSummary||'<tr><td colspan="5">No bank entries</td></tr>'}</table>`;
   if(!(state.hisaab||[]).length)h+=`<p class="say">Hisaab mein abhi koi entry nahi likhi, is liye har screenshot "ledger mein record nahi" mein aayega.</p>`;
   orderedBanks.forEach(([bank,its],i)=>{
